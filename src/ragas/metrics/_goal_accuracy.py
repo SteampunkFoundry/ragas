@@ -6,7 +6,12 @@ from dataclasses import dataclass, field
 from pydantic import BaseModel, Field
 
 from ragas.dataset_schema import MultiTurnSample
-from ragas.metrics.base import MetricType, MetricWithLLM, MultiTurnMetric
+from ragas.metrics.base import (
+    MetricOutputType,
+    MetricType,
+    MetricWithLLM,
+    MultiTurnMetric,
+)
 from ragas.prompt import PydanticPrompt
 
 if t.TYPE_CHECKING:
@@ -97,7 +102,7 @@ class CompareOutcomePrompt(PydanticPrompt[CompareOutcomeInput, CompareOutcomeOut
 
 @dataclass
 class AgentGoalAccuracyWithReference(MetricWithLLM, MultiTurnMetric):
-    name: str = "agent_goal_accuracy"  # type: ignore
+    name: str = "agent_goal_accuracy"
     _required_columns: t.Dict[MetricType, t.Set[str]] = field(
         default_factory=lambda: {
             MetricType.MULTI_TURN: {
@@ -106,6 +111,7 @@ class AgentGoalAccuracyWithReference(MetricWithLLM, MultiTurnMetric):
             }
         }
     )
+    output_type: t.Optional[MetricOutputType] = MetricOutputType.BINARY
     workflow_prompt: PydanticPrompt = field(
         default_factory=lambda: InferGoalOutcomePrompt()
     )
@@ -113,6 +119,9 @@ class AgentGoalAccuracyWithReference(MetricWithLLM, MultiTurnMetric):
         default_factory=lambda: CompareOutcomePrompt()
     )
     max_retries: int = 1
+
+    async def _ascore(self, row: t.Dict, callbacks: Callbacks) -> float:
+        raise NotImplementedError
 
     async def _multi_turn_ascore(
         self,
@@ -137,7 +146,7 @@ class AgentGoalAccuracyWithReference(MetricWithLLM, MultiTurnMetric):
 
 @dataclass
 class AgentGoalAccuracyWithoutReference(MetricWithLLM, MultiTurnMetric):
-    name: str = "agent_goal_accuracy"  # type: ignore
+    name: str = "agent_goal_accuracy"
     _required_columns: t.Dict[MetricType, t.Set[str]] = field(
         default_factory=lambda: {
             MetricType.MULTI_TURN: {
@@ -152,6 +161,9 @@ class AgentGoalAccuracyWithoutReference(MetricWithLLM, MultiTurnMetric):
         default_factory=lambda: CompareOutcomePrompt()
     )
     max_retries: int = 1
+
+    async def _ascore(self, row: t.Dict, callbacks: Callbacks) -> float:
+        raise NotImplementedError
 
     async def _multi_turn_ascore(
         self,

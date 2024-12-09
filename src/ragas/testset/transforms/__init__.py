@@ -1,4 +1,10 @@
-from .base import BaseGraphTransformation, Extractor, RelationshipBuilder, Splitter
+from .base import (
+    BaseGraphTransformation,
+    Extractor,
+    NodeFilter,
+    RelationshipBuilder,
+    Splitter,
+)
 from .default import default_transforms
 from .engine import Parallel, Transforms, apply_transforms, rollback_transforms
 from .extractors import (
@@ -8,9 +14,14 @@ from .extractors import (
     SummaryExtractor,
     TitleExtractor,
 )
+from .filters import CustomNodeFilter
 from .relationship_builders.cosine import (
     CosineSimilarityBuilder,
     SummaryCosineSimilarityBuilder,
+)
+from .relationship_builders.traditional import (
+    JaccardSimilarityBuilder,
+    OverlapScoreBuilder,
 )
 from .splitters import HeadlineSplitter
 
@@ -37,4 +48,8 @@ __all__ = [
     "SummaryCosineSimilarityBuilder",
     # splitters
     "HeadlineSplitter",
+    "CustomNodeFilter",
+    "NodeFilter",
+    "JaccardSimilarityBuilder",
+    "OverlapScoreBuilder",
 ]

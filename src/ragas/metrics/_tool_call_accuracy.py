@@ -15,12 +15,12 @@ if t.TYPE_CHECKING:
 
 @dataclass
 class ToolCallAccuracy(MultiTurnMetric):
-    name: str = "tool_call_accuracy"  # type: ignore
+    name: str = "tool_call_accuracy"
     _required_columns: t.Dict[MetricType, t.Set[str]] = field(
         default_factory=lambda: {
             MetricType.MULTI_TURN: {
                 "user_input",
-                "reference",
+                "reference_tool_calls",
             }
         }
     )
@@ -35,6 +35,11 @@ class ToolCallAccuracy(MultiTurnMetric):
     async def _get_arg_score(
         self, preds: t.Dict[str, t.Any], refs: t.Dict[str, t.Any], callbacks: Callbacks
     ) -> float:
+        if not refs and not preds:
+            return 1.0
+        if not refs:
+            return 0.0
+
         score = 0.0
         for arg in refs.keys():
             if arg in preds:
@@ -61,7 +66,9 @@ class ToolCallAccuracy(MultiTurnMetric):
     async def _multi_turn_ascore(
         self, sample: MultiTurnSample, callbacks: Callbacks
     ) -> float:
-        assert sample.reference_tool_calls is not None, "Reference is not set"
+        assert (
+            sample.reference_tool_calls is not None
+        ), "Reference tool calls is not set"
 
         pred_tool_calls = []
         for item in sample.user_input:

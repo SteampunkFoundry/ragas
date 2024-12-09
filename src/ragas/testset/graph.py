@@ -1,6 +1,7 @@
 import json
 import typing as t
 import uuid
+from copy import deepcopy
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -206,11 +207,15 @@ class KnowledgeGraph:
     def __str__(self) -> str:
         return self.__repr__()
 
-    def find_clusters(
-        self, relationship_condition: t.Callable[[Relationship], bool] = lambda _: True
+    def find_indirect_clusters(
+        self,
+        relationship_condition: t.Callable[[Relationship], bool] = lambda _: True,
+        depth_limit: int = 3,
     ) -> t.List[t.Set[Node]]:
         """
-        Finds clusters of nodes in the knowledge graph based on a relationship condition.
+        Finds indirect clusters of nodes in the knowledge graph based on a relationship condition.
+        Here if A -> B -> C -> D, then A, B, C, and D form a cluster. If there's also a path A -> B -> C -> E,
+        it will form a separate cluster.
 
         Parameters
         ----------
@@ -223,31 +228,136 @@ class KnowledgeGraph:
             A list of sets, where each set contains nodes that form a cluster.
         """
         clusters = []
-        visited = set()
+        visited_paths = set()
 
         relationships = [
             rel for rel in self.relationships if relationship_condition(rel)
         ]
 
-        def dfs(node: Node, cluster: t.Set[Node]):
-            visited.add(node)
+        def dfs(node: Node, cluster: t.Set[Node], depth: int, path: t.Tuple[Node, ...]):
+            if depth >= depth_limit or path in visited_paths:
+                return
+            visited_paths.add(path)
             cluster.add(node)
+
             for rel in relationships:
-                if rel.source == node and rel.target not in visited:
-                    dfs(rel.target, cluster)
-                # if the relationship is bidirectional, we need to check the reverse
+                neighbor = None
+                if rel.source == node and rel.target not in cluster:
+                    neighbor = rel.target
                 elif (
                     rel.bidirectional
                     and rel.target == node
-                    and rel.source not in visited
+                    and rel.source not in cluster
                 ):
-                    dfs(rel.source, cluster)
+                    neighbor = rel.source
+
+                if neighbor is not None:
+                    dfs(neighbor, cluster.copy(), depth + 1, path + (neighbor,))
+
+            # Add completed path-based cluster
+            if len(cluster) > 1:
+                clusters.append(cluster)
 
         for node in self.nodes:
-            if node not in visited:
-                cluster = set()
-                dfs(node, cluster)
-                if len(cluster) > 1:
-                    clusters.append(cluster)
+            initial_cluster = set()
+            dfs(node, initial_cluster, 0, (node,))
 
-        return clusters
+        # Remove duplicates by converting clusters to frozensets
+        unique_clusters = [
+            set(cluster) for cluster in set(frozenset(c) for c in clusters)
+        ]
+
+        return unique_clusters
+
+    def remove_node(
+        self, node: Node, inplace: bool = True
+    ) -> t.Optional["KnowledgeGraph"]:
+        """
+        Removes a node and its associated relationships from the knowledge graph.
+
+        Parameters
+        ----------
+        node : Node
+            The node to be removed from the knowledge graph.
+        inplace : bool, optional
+            If True, modifies the knowledge graph in place.
+            If False, returns a modified copy with the node removed.
+
+        Returns
+        -------
+        KnowledgeGraph or None
+            Returns a modified copy of the knowledge graph if `inplace` is False.
+            Returns None if `inplace` is True.
+
+        Raises
+        ------
+        ValueError
+            If the node is not present in the knowledge graph.
+        """
+        if node not in self.nodes:
+            raise ValueError("Node is not present in the knowledge graph.")
+
+        if inplace:
+            # Modify the current instance
+            self.nodes.remove(node)
+            self.relationships = [
+                rel
+                for rel in self.relationships
+                if rel.source != node and rel.target != node
+            ]
+        else:
+            # Create a deep copy and modify it
+            new_graph = deepcopy(self)
+            new_graph.nodes.remove(node)
+            new_graph.relationships = [
+                rel
+                for rel in new_graph.relationships
+                if rel.source != node and rel.target != node
+            ]
+            return new_graph
+
+    def find_two_nodes_single_rel(
+        self, relationship_condition: t.Callable[[Relationship], bool] = lambda _: True
+    ) -> t.List[t.Tuple[Node, Relationship, Node]]:
+        """
+        Finds nodes in the knowledge graph based on a relationship condition.
+        (NodeA, NodeB, Rel) triples are considered as multi-hop nodes.
+
+        Parameters
+        ----------
+        relationship_condition : Callable[[Relationship], bool], optional
+            A function that takes a Relationship and returns a boolean, by default lambda _: True
+
+        Returns
+        -------
+        List[Set[Node, Relationship, Node]]
+            A list of sets, where each set contains two nodes and a relationship forming a multi-hop node.
+        """
+
+        relationships = [
+            relationship
+            for relationship in self.relationships
+            if relationship_condition(relationship)
+        ]
+
+        triplets = set()
+
+        for relationship in relationships:
+            if relationship.source != relationship.target:
+                node_a = relationship.source
+                node_b = relationship.target
+                # Ensure the smaller ID node is always first
+                if node_a.id < node_b.id:
+                    normalized_tuple = (node_a, relationship, node_b)
+                else:
+                    normalized_relationship = Relationship(
+                        source=node_b,
+                        target=node_a,
+                        type=relationship.type,
+                        properties=relationship.properties,
+                    )
+                    normalized_tuple = (node_b, normalized_relationship, node_a)
+
+                triplets.add(normalized_tuple)
+
+        return list(triplets)

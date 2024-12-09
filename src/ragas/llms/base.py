@@ -45,8 +45,8 @@ def is_multiple_completion_supported(llm: BaseLanguageModel) -> bool:
 
 @dataclass
 class BaseRagasLLM(ABC):
-    run_config: RunConfig = field(default_factory=RunConfig)
-    multiple_completion_supported: bool = False
+    run_config: RunConfig = field(default_factory=RunConfig, repr=False)
+    multiple_completion_supported: bool = field(default=False, repr=False)
 
     def set_run_config(self, run_config: RunConfig):
         self.run_config = run_config
@@ -134,7 +134,7 @@ class LangchainLLMWrapper(BaseRagasLLM):
     def is_finished(self, response: LLMResult) -> bool:
         """
         Parse the response to check if the LLM finished by checking the finish_reason
-        or stop_reason.
+        or stop_reason. Supports OpenAI and Vertex AI models.
         """
         if self.is_finished_parser is not None:
             return self.is_finished_parser(response)
@@ -145,27 +145,34 @@ class LangchainLLMWrapper(BaseRagasLLM):
             resp = g.generations[0][0]
             if resp.generation_info is not None:
                 # generation_info is provided - so we parse that
-
-                # OpenAI uses "stop" to indicate that the generation is finished
-                # and is stored in 'finish_reason' key in generation_info
-                if resp.generation_info.get("finish_reason") is not None:
+                finish_reason = resp.generation_info.get("finish_reason")
+                if finish_reason is not None:
+                    # OpenAI uses "stop"
+                    # Vertex AI uses "STOP" or "MAX_TOKENS"
                     is_finished_list.append(
-                        resp.generation_info.get("finish_reason") == "stop"
+                        finish_reason in ["stop", "STOP", "MAX_TOKENS"]
                     )
+
                 # provied more conditions here
                 # https://github.com/explodinggradients/ragas/issues/1548
 
             # if generation_info is empty, we parse the response_metadata
             # this is less reliable
-            elif t.cast(ChatGeneration, resp).message is not None:
+
+            elif (
+                isinstance(resp, ChatGeneration)
+                and t.cast(ChatGeneration, resp).message is not None
+            ):
                 resp_message: BaseMessage = t.cast(ChatGeneration, resp).message
                 if resp_message.response_metadata.get("finish_reason") is not None:
+                    finish_reason = resp_message.response_metadata.get("finish_reason")
                     is_finished_list.append(
-                        resp_message.response_metadata.get("finish_reason") == "stop"
+                        finish_reason in ["stop", "STOP", "MAX_TOKENS"]
                     )
                 elif resp_message.response_metadata.get("stop_reason") is not None:
+                    stop_reason = resp_message.response_metadata.get("stop_reason")
                     is_finished_list.append(
-                        resp_message.response_metadata.get("stop_reason") == "end_turn"
+                        stop_reason in ["end_turn", "STOP", "MAX_TOKENS"]
                     )
             # default to True
             else:
@@ -253,6 +260,9 @@ class LangchainLLMWrapper(BaseRagasLLM):
             self.langchain_llm.request_timeout = run_config.timeout
             self.run_config.exception_types = RateLimitError
 
+    def __repr__(self) -> str:
+        return f"{self.__class__.__name__}(langchain_llm={self.langchain_llm.__class__.__name__}(...))"
+
 
 class LlamaIndexLLMWrapper(BaseRagasLLM):
     """
@@ -266,9 +276,11 @@ class LlamaIndexLLMWrapper(BaseRagasLLM):
     ):
         self.llm = llm
 
-        self._signature = ""
-        if type(self.llm).__name__.lower() == "bedrock":
-            self._signature = "bedrock"
+        try:
+            self._signature = type(self.llm).__name__.lower()
+        except AttributeError:
+            self._signature = ""
+
         if run_config is None:
             run_config = RunConfig()
         self.set_run_config(run_config)
@@ -290,7 +302,7 @@ class LlamaIndexLLMWrapper(BaseRagasLLM):
             logger.info(
                 "callbacks not supported for LlamaIndex LLMs, ignoring callbacks"
             )
-        if self._signature == "bedrock":
+        if self._signature in ["anthropic", "bedrock"]:
             return {"temperature": temperature}
         else:
             return {
@@ -298,6 +310,9 @@ class LlamaIndexLLMWrapper(BaseRagasLLM):
                 "temperature": temperature,
                 "stop": stop,
             }
+
+    def is_finished(self, response: LLMResult) -> bool:
+        return True
 
     def generate_text(
         self,
@@ -327,6 +342,9 @@ class LlamaIndexLLMWrapper(BaseRagasLLM):
         li_response = await self.llm.acomplete(prompt.to_string(), **kwargs)
 
         return LLMResult(generations=[[Generation(text=li_response.text)]])
+
+    def __repr__(self) -> str:
+        return f"{self.__class__.__name__}(llm={self.llm.__class__.__name__}(...))"
 
 
 def llm_factory(

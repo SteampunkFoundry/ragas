@@ -1,8 +1,11 @@
 import copy
+import typing as t
 
+import numpy as np
 import pytest
 from langchain_core.outputs import Generation, LLMResult
 from langchain_core.prompt_values import StringPromptValue
+from pydantic import BaseModel
 
 from ragas.llms.base import BaseRagasLLM
 from ragas.prompt import StringIO, StringPrompt
@@ -120,9 +123,9 @@ def test_prompt_hash():
 
 def test_prompt_hash_in_ragas(fake_llm):
     # check with a prompt inside ragas
-    from ragas.testset.synthesizers import AbstractQuerySynthesizer
+    from ragas.testset.synthesizers.multi_hop import MultiHopAbstractQuerySynthesizer
 
-    synthesizer = AbstractQuerySynthesizer(llm=fake_llm)
+    synthesizer = MultiHopAbstractQuerySynthesizer(llm=fake_llm)
     prompts = synthesizer.get_prompts()
     for prompt in prompts.values():
         assert hash(prompt) == hash(prompt)
@@ -178,12 +181,12 @@ def test_prompt_save_load_language(tmp_path):
 
 
 def test_save_existing_prompt(tmp_path):
-    from ragas.testset.synthesizers.prompts import CommonThemeFromSummariesPrompt
+    from ragas.testset.synthesizers.prompts import ThemesPersonasMatchingPrompt
 
-    p = CommonThemeFromSummariesPrompt()
+    p = ThemesPersonasMatchingPrompt()
     file_path = tmp_path / "test_prompt.json"
     p.save(file_path)
-    p2 = CommonThemeFromSummariesPrompt.load(file_path)
+    p2 = ThemesPersonasMatchingPrompt.load(file_path)
     assert p == p2
 
 
@@ -193,13 +196,69 @@ def test_prompt_class_attributes():
     We want to make sure there is no relationship between the class attributes
     and instance.
     """
-    from ragas.testset.synthesizers.prompts import CommonThemeFromSummariesPrompt
+    from ragas.testset.synthesizers.prompts import ThemesPersonasMatchingPrompt
 
-    p = CommonThemeFromSummariesPrompt()
-    p_another_instance = CommonThemeFromSummariesPrompt()
+    p = ThemesPersonasMatchingPrompt()
+    p_another_instance = ThemesPersonasMatchingPrompt()
     assert p.instruction == p_another_instance.instruction
     assert p.examples == p_another_instance.examples
     p.instruction = "You are a helpful assistant."
     p.examples = []
     assert p.instruction != p_another_instance.instruction
     assert p.examples != p_another_instance.examples
+
+
+@pytest.mark.asyncio
+async def test_prompt_parse_retry():
+    from ragas.exceptions import RagasOutputParserException
+    from ragas.prompt import PydanticPrompt, StringIO
+
+    class OutputModel(BaseModel):
+        example: str
+
+    class Prompt(PydanticPrompt[StringIO, OutputModel]):
+        instruction = ""
+        input_model = StringIO
+        output_model = OutputModel
+
+    echo_llm = EchoLLM(run_config=RunConfig())
+    prompt = Prompt()
+    with pytest.raises(RagasOutputParserException):
+        await prompt.generate(
+            data=StringIO(text="this prompt will be echoed back as invalid JSON"),
+            llm=echo_llm,
+        )
+
+
+def cosine_similarity(v1: t.List[float], v2: t.List[float]) -> float:
+    """Calculate cosine similarity between two vectors."""
+    v1_array = np.array(v1)
+    v2_array = np.array(v2)
+    return np.dot(v1_array, v2_array) / (
+        np.linalg.norm(v1_array) * np.linalg.norm(v2_array)
+    )
+
+
+@pytest.mark.skip(reason="TODO: Implement embedding calculation")
+def test_in_memory_example_store():
+    from ragas.prompt import InMemoryExampleStore
+
+    class FakeInputModel(BaseModel):
+        text: str
+        embedding: t.List[float]
+
+    class FakeOutputModel(BaseModel):
+        text: str
+
+    store = InMemoryExampleStore()
+    store.add_example(
+        FakeInputModel(text="hello", embedding=[1, 2, 3]),
+        FakeOutputModel(text="hello"),
+    )
+    store.add_example(
+        FakeInputModel(text="world", embedding=[1, 2, 4]),
+        FakeOutputModel(text="world"),
+    )
+    assert store.get_examples(FakeInputModel(text="hello", embedding=[1, 2, 3])) == [
+        FakeOutputModel(text="hello")
+    ]

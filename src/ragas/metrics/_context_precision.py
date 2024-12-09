@@ -9,7 +9,13 @@ from pydantic import BaseModel, Field
 
 from ragas.dataset_schema import SingleTurnSample
 from ragas.metrics._string import NonLLMStringSimilarity
-from ragas.metrics.base import MetricType, MetricWithLLM, SingleTurnMetric, ensembler
+from ragas.metrics.base import (
+    MetricOutputType,
+    MetricType,
+    MetricWithLLM,
+    SingleTurnMetric,
+    ensembler,
+)
 from ragas.prompt import PydanticPrompt
 from ragas.run_config import RunConfig
 from ragas.utils import deprecated
@@ -88,7 +94,7 @@ class LLMContextPrecisionWithReference(MetricWithLLM, SingleTurnMetric):
     context_precision_prompt: Prompt
     """
 
-    name: str = "llm_context_precision_with_reference"  # type: ignore
+    name: str = "llm_context_precision_with_reference"
     _required_columns: t.Dict[MetricType, t.Set[str]] = field(
         default_factory=lambda: {
             MetricType.SINGLE_TURN: {
@@ -98,11 +104,15 @@ class LLMContextPrecisionWithReference(MetricWithLLM, SingleTurnMetric):
             }
         }
     )
+    output_type = MetricOutputType.CONTINUOUS
     context_precision_prompt: PydanticPrompt = field(
         default_factory=ContextPrecisionPrompt
     )
     max_retries: int = 1
     _reproducibility: int = 1
+
+    def _get_row_attributes(self, row: t.Dict) -> t.Tuple[str, t.List[str], t.Any]:
+        return row["user_input"], row["retrieved_contexts"], row["reference"]
 
     @property
     def reproducibility(self):
@@ -147,20 +157,21 @@ class LLMContextPrecisionWithReference(MetricWithLLM, SingleTurnMetric):
         return await self._ascore(row, callbacks)
 
     async def _ascore(
-        self: t.Self,
+        self,
         row: t.Dict,
         callbacks: Callbacks,
     ) -> float:
         assert self.llm is not None, "LLM is not set"
 
+        user_input, retrieved_contexts, reference = self._get_row_attributes(row)
         responses = []
-        for context in row["retrieved_contexts"]:
+        for context in retrieved_contexts:
             verdicts: t.List[Verification] = (
                 await self.context_precision_prompt.generate_multiple(
                     data=QAC(
-                        question=row["user_input"],
+                        question=user_input,
                         context=context,
-                        answer=row["reference"],
+                        answer=reference,
                     ),
                     n=self.reproducibility,
                     llm=self.llm,
@@ -194,7 +205,7 @@ class LLMContextPrecisionWithoutReference(LLMContextPrecisionWithReference):
 
 @dataclass
 class NonLLMContextPrecisionWithReference(SingleTurnMetric):
-    name: str = "non_llm_context_precision_with_reference"  # type: ignore
+    name: str = "non_llm_context_precision_with_reference"
     _required_columns: t.Dict[MetricType, t.Set[str]] = field(
         default_factory=lambda: {
             MetricType.SINGLE_TURN: {
@@ -259,7 +270,7 @@ class NonLLMContextPrecisionWithReference(SingleTurnMetric):
 
 @dataclass
 class ContextPrecision(LLMContextPrecisionWithReference):
-    name: str = "context_precision"  # type: ignore
+    name: str = "context_precision"
 
     async def _single_turn_ascore(
         self, sample: SingleTurnSample, callbacks: Callbacks
@@ -275,7 +286,7 @@ class ContextPrecision(LLMContextPrecisionWithReference):
 
 @dataclass
 class ContextUtilization(LLMContextPrecisionWithoutReference):
-    name: str = "context_utilization"  # type: ignore
+    name: str = "context_utilization"
 
     async def _single_turn_ascore(
         self, sample: SingleTurnSample, callbacks: Callbacks

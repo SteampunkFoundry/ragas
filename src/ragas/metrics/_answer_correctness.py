@@ -15,12 +15,14 @@ from ragas.metrics._faithfulness import (
     LongFormAnswerPrompt,
 )
 from ragas.metrics.base import (
+    MetricOutputType,
     MetricType,
     MetricWithEmbeddings,
     MetricWithLLM,
     SingleTurnMetric,
     get_segmenter,
 )
+from ragas.metrics.utils import fbeta_score
 from ragas.prompt import PydanticPrompt
 from ragas.run_config import RunConfig
 
@@ -156,22 +158,24 @@ class AnswerCorrectness(MetricWithLLM, MetricWithEmbeddings, SingleTurnMetric):
         The AnswerSimilarity object
     """
 
-    name: str = "answer_correctness"  # type: ignore[reportIncompatibleMethodOverride]
+    name: str = "answer_correctness"
     _required_columns: t.Dict[MetricType, t.Set[str]] = field(
         default_factory=lambda: {
             MetricType.SINGLE_TURN: {"user_input", "response", "reference"}
         }
     )
+    output_type = MetricOutputType.CONTINUOUS
     correctness_prompt: PydanticPrompt = field(default_factory=CorrectnessClassifier)
     long_form_answer_prompt: PydanticPrompt = field(
         default_factory=LongFormAnswerPrompt
     )
     weights: list[float] = field(default_factory=lambda: [0.75, 0.25])
+    beta: float = 1.0
     answer_similarity: t.Optional[AnswerSimilarity] = None
     sentence_segmenter: t.Optional[HasSegmentMethod] = None
     max_retries: int = 1
 
-    def __post_init__(self: t.Self):
+    def __post_init__(self):
         if len(self.weights) != 2:
             raise ValueError(
                 "Expects a list of two weights. First for factuality, second for semantic similarity"
@@ -185,12 +189,15 @@ class AnswerCorrectness(MetricWithLLM, MetricWithEmbeddings, SingleTurnMetric):
             language = self.long_form_answer_prompt.language
             self.sentence_segmenter = get_segmenter(language=language, clean=False)
 
+        if type(self.beta) is not float:
+            raise ValueError(
+                "Beta must be a float. A beta > 1 gives more weight to recall, while beta < 1 favors precision."
+            )
+
     def init(self, run_config: RunConfig):
         super().init(run_config)
         if self.answer_similarity is None and self.weights[1] != 0:
-            self.answer_similarity = AnswerSimilarity(
-                llm=self.llm, embeddings=self.embeddings
-            )
+            self.answer_similarity = AnswerSimilarity(embeddings=self.embeddings)
 
     def _compute_statement_presence(
         self, prediction: ClassificationWithReason
@@ -198,7 +205,7 @@ class AnswerCorrectness(MetricWithLLM, MetricWithEmbeddings, SingleTurnMetric):
         tp = len(prediction.TP)
         fp = len(prediction.FP)
         fn = len(prediction.FN)
-        score = tp / (tp + 0.5 * (fp + fn)) if tp > 0 else 0
+        score = fbeta_score(tp, fp, fn, self.beta)
         return score
 
     async def _create_simplified_statements(
@@ -224,7 +231,7 @@ class AnswerCorrectness(MetricWithLLM, MetricWithEmbeddings, SingleTurnMetric):
         return statements_simplified
 
     async def _single_turn_ascore(
-        self: t.Self, sample: SingleTurnSample, callbacks: Callbacks
+        self, sample: SingleTurnSample, callbacks: Callbacks
     ) -> float:
         row = sample.to_dict()
         score = await self._ascore(row, callbacks)

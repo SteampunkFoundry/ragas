@@ -7,7 +7,12 @@ from dataclasses import dataclass, field
 from pydantic import BaseModel, Field
 
 from ragas.dataset_schema import SingleTurnSample
-from ragas.metrics.base import MetricType, MetricWithLLM, SingleTurnMetric
+from ragas.metrics.base import (
+    MetricOutputType,
+    MetricType,
+    MetricWithLLM,
+    SingleTurnMetric,
+)
 from ragas.prompt import PydanticPrompt
 
 if t.TYPE_CHECKING:
@@ -64,12 +69,13 @@ class EquivalencePrompt(PydanticPrompt[EquivalenceInput, EquivalenceOutput]):
 
 @dataclass
 class LLMSQLEquivalence(MetricWithLLM, SingleTurnMetric):
-    name: str = "llm_sql_equivalence_with_reference"  # type: ignore
+    name: str = "llm_sql_equivalence_with_reference"
     _required_columns: t.Dict[MetricType, t.Set[str]] = field(
         default_factory=lambda: {
             MetricType.SINGLE_TURN: {"response", "reference", "reference_contexts"}
         }
     )
+    output_type: t.Optional[MetricOutputType] = MetricOutputType.BINARY
     equivalence_prompt: PydanticPrompt = EquivalencePrompt()
 
     async def _single_turn_ascore(

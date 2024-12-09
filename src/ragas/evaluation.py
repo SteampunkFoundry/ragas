@@ -1,14 +1,15 @@
 from __future__ import annotations
 
 import typing as t
+from uuid import UUID
 
-import numpy as np
 from datasets import Dataset
 from langchain_core.callbacks import BaseCallbackHandler, BaseCallbackManager
 from langchain_core.embeddings import Embeddings as LangchainEmbeddings
 from langchain_core.language_models import BaseLanguageModel as LangchainLLM
+from tqdm.auto import tqdm
 
-from ragas._analytics import EvaluationEvent, track, track_was_completed
+from ragas._analytics import track_was_completed
 from ragas.callbacks import ChainType, RagasTracer, new_group
 from ragas.dataset_schema import (
     EvaluationDataset,
@@ -37,7 +38,7 @@ from ragas.metrics.base import (
     is_reproducable,
 )
 from ragas.run_config import RunConfig
-from ragas.utils import convert_v1_to_v2_dataset, get_feature_language
+from ragas.utils import convert_v1_to_v2_dataset
 from ragas.validation import (
     remap_column_names,
     validate_required_columns,
@@ -55,16 +56,19 @@ RAGAS_EVALUATION_CHAIN_NAME = "ragas evaluation"
 @track_was_completed
 def evaluate(
     dataset: t.Union[Dataset, EvaluationDataset],
-    metrics: list[Metric] | None = None,
+    metrics: t.Optional[t.Sequence[Metric]] = None,
     llm: t.Optional[BaseRagasLLM | LangchainLLM] = None,
     embeddings: t.Optional[BaseRagasEmbeddings | LangchainEmbeddings] = None,
     callbacks: Callbacks = None,
     in_ci: bool = False,
-    run_config: RunConfig = RunConfig(),
+    run_config: t.Optional[RunConfig] = None,
     token_usage_parser: t.Optional[TokenUsageParser] = None,
     raise_exceptions: bool = False,
     column_map: t.Optional[t.Dict[str, str]] = None,
     show_progress: bool = True,
+    batch_size: t.Optional[int] = None,
+    _run_id: t.Optional[UUID] = None,
+    _pbar: t.Optional[tqdm] = None,
 ) -> EvaluationResult:
     """
     Run the evaluation on the dataset with different metrics
@@ -110,12 +114,14 @@ def evaluate(
         column_map can be given as {"contexts":"contexts_v1"}
     show_progress: bool, optional
         Whether to show the progress bar during evaluation. If set to False, the progress bar will be disabled. Default is True.
+    batch_size: int, optional
+        How large should batches be.  If set to None (default), no batching is done.
 
     Returns
     -------
-    Result
-        Result object containing the scores of each metric. You can use this do analysis
-        later.
+    EvaluationResult
+        EvaluationResult object containing the scores of each metric.
+        You can use this do analysis later.
 
     Raises
     ------
@@ -144,6 +150,7 @@ def evaluate(
     """
     column_map = column_map or {}
     callbacks = callbacks or []
+    run_config = run_config or RunConfig()
 
     if helicone_config.is_enabled:
         import uuid
@@ -223,6 +230,8 @@ def evaluate(
         raise_exceptions=raise_exceptions,
         run_config=run_config,
         show_progress=show_progress,
+        batch_size=batch_size,
+        pbar=_pbar,
     )
 
     # Ragas Callbacks
@@ -330,9 +339,10 @@ def evaluate(
                 cost_cb,
             ),
             ragas_traces=tracer.traces,
+            run_id=_run_id,
         )
         if not evaluation_group_cm.ended:
-            evaluation_rm.on_chain_end(result)
+            evaluation_rm.on_chain_end({"scores": result.scores})
     finally:
         # reset llms and embeddings if changed
         for i in llm_changed:
@@ -347,18 +357,4 @@ def evaluate(
         for i in reproducable_metrics:
             metrics[i].reproducibility = 1  # type: ignore
 
-    # log the evaluation event
-    metrics_names = [m.name for m in metrics]
-    metric_lang = [get_feature_language(m) for m in metrics]
-    metric_lang = np.unique([m for m in metric_lang if m is not None])
-    track(
-        EvaluationEvent(
-            event_type="evaluation",
-            metrics=metrics_names,
-            evaluation_mode="",
-            num_rows=len(dataset),
-            language=metric_lang[0] if len(metric_lang) > 0 else "",
-            in_ci=in_ci,
-        )
-    )
     return result

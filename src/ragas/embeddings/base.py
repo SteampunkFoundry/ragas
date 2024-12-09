@@ -10,11 +10,14 @@ import numpy as np
 from langchain_core.embeddings import Embeddings
 from langchain_openai.embeddings import OpenAIEmbeddings
 from pydantic.dataclasses import dataclass
+from pydantic_core import CoreSchema, core_schema
 
 from ragas.run_config import RunConfig, add_async_retry, add_retry
 
 if t.TYPE_CHECKING:
     from llama_index.core.base.embeddings.base import BaseEmbedding
+    from pydantic import GetCoreSchemaHandler
+
 
 DEFAULT_MODEL_NAME = "BAAI/bge-small-en-v1.5"
 
@@ -63,6 +66,17 @@ class BaseRagasEmbeddings(Embeddings, ABC):
         Set the run configuration for the embedding operations.
         """
         self.run_config = run_config
+
+    @classmethod
+    def __get_pydantic_core_schema__(
+        cls, source_type: t.Any, handler: GetCoreSchemaHandler
+    ) -> CoreSchema:
+        """
+        Define how Pydantic generates a schema for BaseRagasEmbeddings.
+        """
+        return core_schema.no_info_after_validator_function(
+            cls, core_schema.is_instance_schema(cls)  # The validator function
+        )
 
 
 class LangchainEmbeddingsWrapper(BaseRagasEmbeddings):
@@ -118,6 +132,9 @@ class LangchainEmbeddingsWrapper(BaseRagasEmbeddings):
                 )
             self.embeddings.request_timeout = run_config.timeout
             self.run_config.exception_types = RateLimitError
+
+    def __repr__(self) -> str:
+        return f"{self.__class__.__name__}(embeddings={self.embeddings.__class__.__name__}(...))"
 
 
 @dataclass
@@ -298,6 +315,9 @@ class LlamaIndexEmbeddingsWrapper(BaseRagasEmbeddings):
 
     async def aembed_documents(self, texts: t.List[str]) -> t.List[t.List[float]]:
         return await self.embeddings.aget_text_embedding_batch(texts)
+
+    def __repr__(self) -> str:
+        return f"{self.__class__.__name__}(embeddings={self.embeddings.__class__.__name__}(...))"
 
 
 def embedding_factory(

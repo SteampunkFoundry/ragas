@@ -8,7 +8,12 @@ from typing import Dict
 from pydantic import BaseModel
 
 from ragas.dataset_schema import SingleTurnSample
-from ragas.metrics.base import MetricType, MetricWithLLM, SingleTurnMetric
+from ragas.metrics.base import (
+    MetricOutputType,
+    MetricType,
+    MetricWithLLM,
+    SingleTurnMetric,
+)
 from ragas.prompt import PydanticPrompt, StringIO
 
 if t.TYPE_CHECKING:
@@ -107,12 +112,13 @@ class ContextEntityRecall(MetricWithLLM, SingleTurnMetric):
         Batch size for openai completion.
     """
 
-    name: str = "context_entity_recall"  # type: ignore
+    name: str = "context_entity_recall"
     _required_columns: t.Dict[MetricType, t.Set[str]] = field(
         default_factory=lambda: {
             MetricType.SINGLE_TURN: {"reference", "retrieved_contexts"}
         }
     )
+    output_type = MetricOutputType.CONTINUOUS
     context_entity_recall_prompt: PydanticPrompt = field(
         default_factory=ExtractEntitiesPrompt
     )

@@ -28,7 +28,9 @@
     <p>
         <a href="https://docs.ragas.io/">Documentation</a> |
         <a href="#fire-quickstart">Quick start</a> |
-        <a href="https://discord.gg/5djav8GGNZ">Join Discord</a> 
+        <a href="https://discord.gg/5djav8GGNZ">Join Discord</a> |
+        <a href="https://newsletter.ragas.io/">NewsLetter</a> |
+        <a href="https://www.ragas.io/careers">Careers</a>
     <p>
 </h4>
 
@@ -62,9 +64,10 @@ pip install git+https://github.com/explodinggradients/ragas
 
 ### Evaluate your RAG with Ragas metrics
 
-This is 4 main lines:
+This is 5 main lines:
 
 ```python
+from ragas import evaluate
 from ragas.metrics import LLMContextRecall, Faithfulness, FactualCorrectness
 from langchain_openai.chat_models import ChatOpenAI
 from ragas.llms import LangchainLLMWrapper

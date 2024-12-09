@@ -31,6 +31,7 @@ OutputModel = t.TypeVar("OutputModel", bound=BaseModel)
 
 
 class PydanticPrompt(BasePrompt, t.Generic[InputModel, OutputModel]):
+    # these are class attributes
     input_model: t.Type[InputModel]
     output_model: t.Type[OutputModel]
     instruction: str
@@ -42,48 +43,43 @@ class PydanticPrompt(BasePrompt, t.Generic[InputModel, OutputModel]):
     def _generate_output_signature(self, indent: int = 4) -> str:
         return (
             f"Please return the output in a JSON format that complies with the "
-            f"following schema as specified in JSON Schema and OpenAPI specification:\n"
+            f"following schema as specified in JSON Schema:\n"
             f"{self.output_model.model_json_schema()}"
         )
 
     def _generate_examples(self):
         if self.examples:
             example_strings = []
-            for e in self.examples:
+            for idx, e in enumerate(self.examples):
                 input_data, output_data = e
                 example_strings.append(
-                    self.instruction
-                    + "\n"
-                    + "input: "
+                    f"Example {idx + 1}\n"
+                    + "Input: "
                     + input_data.model_dump_json(indent=4)
                     + "\n"
-                    + "output: "
+                    + "Output: "
                     + output_data.model_dump_json(indent=4)
                 )
 
-            return (
-                "These are some examples to show how to perform the above instruction\n"
-                + "\n\n".join(example_strings)
-            )
+            return "\n--------EXAMPLES-----------\n" + "\n\n".join(example_strings)
         # if no examples are provided
         else:
             return ""
 
     def to_string(self, data: t.Optional[InputModel] = None) -> str:
         return (
-            self._generate_instruction()
-            + "\n"
+            f"{self.instruction}\n"
             + self._generate_output_signature()
             + "\n"
             + self._generate_examples()
-            + "\nNow perform the above instruction with the following input\n"
+            + "\n-----------------------------\n"
+            + "\nNow perform the same with the following input\n"
             + (
-                "input: " + data.model_dump_json(indent=4) + "\n"
+                "input: " + data.model_dump_json(indent=4, exclude_none=True) + "\n"
                 if data is not None
-                else "input: (None)\n"
+                else "Input: (None)\n"
             )
-            + "Respond only with a valid JSON object that complies with the specified schema.\n"
-            + "output: "
+            + "Output: "
         )
 
     async def generate(
@@ -93,6 +89,7 @@ class PydanticPrompt(BasePrompt, t.Generic[InputModel, OutputModel]):
         temperature: t.Optional[float] = None,
         stop: t.Optional[t.List[str]] = None,
         callbacks: t.Optional[Callbacks] = None,
+        retries_left: int = 3,
     ) -> OutputModel:
         """
         Generate a single output using the provided language model and input data.
@@ -111,6 +108,8 @@ class PydanticPrompt(BasePrompt, t.Generic[InputModel, OutputModel]):
             A list of stop sequences to end generation.
         callbacks : Callbacks, optional
             Callback functions to be called during the generation process.
+        retries_left : int, optional
+            Number of retry attempts for an invalid LLM response
 
         Returns
         -------
@@ -131,6 +130,7 @@ class PydanticPrompt(BasePrompt, t.Generic[InputModel, OutputModel]):
             temperature=temperature,
             stop=stop,
             callbacks=callbacks,
+            retries_left=retries_left,
         )
         return output_single[0]
 
@@ -142,6 +142,7 @@ class PydanticPrompt(BasePrompt, t.Generic[InputModel, OutputModel]):
         temperature: t.Optional[float] = None,
         stop: t.Optional[t.List[str]] = None,
         callbacks: t.Optional[Callbacks] = None,
+        retries_left: int = 3,
     ) -> t.List[OutputModel]:
         """
         Generate multiple outputs using the provided language model and input data.
@@ -160,6 +161,8 @@ class PydanticPrompt(BasePrompt, t.Generic[InputModel, OutputModel]):
             A list of stop sequences to end generation.
         callbacks : Callbacks, optional
             Callback functions to be called during the generation process.
+        retries_left : int, optional
+            Number of retry attempts for an invalid LLM response
 
         Returns
         -------
@@ -198,7 +201,7 @@ class PydanticPrompt(BasePrompt, t.Generic[InputModel, OutputModel]):
                     prompt_value=prompt_value,
                     llm=llm,
                     callbacks=prompt_cb,
-                    max_retries=3,
+                    retries_left=retries_left,
                 )
                 processed_output = self.process_output(answer, data)  # type: ignore
                 output_models.append(processed_output)
@@ -390,14 +393,14 @@ class RagasOutputParser(PydanticOutputParser[OutputModel]):
         prompt_value: PromptValue,
         llm: BaseRagasLLM,
         callbacks: Callbacks,
-        max_retries: int = 1,
+        retries_left: int = 1,
     ):
         callbacks = callbacks or []
         try:
             jsonstr = extract_json(output_string)
             result = super().parse(jsonstr)
         except OutputParserException:
-            if max_retries != 0:
+            if retries_left != 0:
                 retry_rm, retry_cb = new_group(
                     name="fix_output_format",
                     inputs={"output_string": output_string},
@@ -410,17 +413,12 @@ class RagasOutputParser(PydanticOutputParser[OutputModel]):
                         prompt_value=prompt_value.to_string(),
                     ),
                     callbacks=retry_cb,
+                    retries_left=retries_left - 1,
                 )
                 retry_rm.on_chain_end({"fixed_output_string": fixed_output_string})
-                return await self.parse_output_string(
-                    output_string=fixed_output_string.text,
-                    prompt_value=prompt_value,
-                    llm=llm,
-                    max_retries=max_retries - 1,
-                    callbacks=callbacks,
-                )
+                result = fixed_output_string
             else:
-                raise RagasOutputParserException(num_retries=max_retries)
+                raise RagasOutputParserException()
         return result
 
 

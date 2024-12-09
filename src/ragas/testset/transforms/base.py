@@ -3,9 +3,14 @@ import typing as t
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 
+import tiktoken
+from tiktoken.core import Encoding
+
 from ragas.llms import BaseRagasLLM, llm_factory
 from ragas.prompt import PromptMixin
 from ragas.testset.graph import KnowledgeGraph, Node, Relationship
+
+DEFAULT_TOKENIZER = tiktoken.get_encoding("o200k_base")
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +26,10 @@ class BaseGraphTransformation(ABC):
     """
 
     name: str = ""
+
+    filter_nodes: t.Callable[[Node], bool] = field(
+        default_factory=lambda: default_filter
+    )
 
     def __post_init__(self):
         if not self.name:
@@ -59,7 +68,15 @@ class BaseGraphTransformation(ABC):
         KnowledgeGraph
             The filtered knowledge graph.
         """
-        return kg
+
+        return KnowledgeGraph(
+            nodes=[node for node in kg.nodes if self.filter_nodes(node)],
+            relationships=[
+                rel
+                for rel in kg.relationships
+                if rel.source in kg.nodes and rel.target in kg.nodes
+            ],
+        )
 
     @abstractmethod
     def generate_execution_plan(self, kg: KnowledgeGraph) -> t.List[t.Coroutine]:
@@ -94,10 +111,6 @@ class Extractor(BaseGraphTransformation):
     extract(node: Node) -> t.Tuple[str, t.Any]
         Abstract method to extract a specific property from a node.
     """
-
-    filter_nodes: t.Callable[[Node], bool] = field(
-        default_factory=lambda: default_filter
-    )
 
     async def transform(
         self, kg: KnowledgeGraph
@@ -175,21 +188,26 @@ class Extractor(BaseGraphTransformation):
         filtered = self.filter(kg)
         return [apply_extract(node) for node in filtered.nodes]
 
-    def filter(self, kg: KnowledgeGraph) -> KnowledgeGraph:
-        return KnowledgeGraph(
-            nodes=[node for node in kg.nodes if self.filter_nodes(node)],
-            relationships=[
-                rel
-                for rel in kg.relationships
-                if rel.source in kg.nodes and rel.target in kg.nodes
-            ],
-        )
-
 
 @dataclass
 class LLMBasedExtractor(Extractor, PromptMixin):
     llm: BaseRagasLLM = field(default_factory=llm_factory)
     merge_if_possible: bool = True
+    max_token_limit: int = 32000
+    tokenizer: Encoding = DEFAULT_TOKENIZER
+
+    def split_text_by_token_limit(self, text, max_token_limit):
+
+        # Tokenize the entire input string
+        tokens = self.tokenizer.encode(text)
+
+        # Split tokens into chunks of max_token_limit or less
+        chunks = []
+        for i in range(0, len(tokens), max_token_limit):
+            chunk_tokens = tokens[i : i + max_token_limit]
+            chunks.append(self.tokenizer.decode(chunk_tokens))
+
+        return chunks
 
 
 class Splitter(BaseGraphTransformation):
@@ -324,3 +342,55 @@ class RelationshipBuilder(BaseGraphTransformation):
 
         filtered_kg = self.filter(kg)
         return [apply_build_relationships(filtered_kg=filtered_kg, original_kg=kg)]
+
+
+@dataclass
+class NodeFilter(BaseGraphTransformation):
+
+    async def transform(self, kg: KnowledgeGraph) -> KnowledgeGraph:
+
+        filtered = self.filter(kg)
+
+        for node in filtered.nodes:
+            flag = await self.custom_filter(node, kg)
+            if flag:
+                kg_ = kg.remove_node(node, inplace=False)
+                if isinstance(kg_, KnowledgeGraph):
+                    return kg_
+                else:
+                    raise ValueError("Error in removing node")
+        return kg
+
+    @abstractmethod
+    async def custom_filter(self, node: Node, kg: KnowledgeGraph) -> bool:
+        """
+        Abstract method to filter a node based on a prompt.
+
+        Parameters
+        ----------
+        node : Node
+            The node to be filtered.
+
+        Returns
+        -------
+        bool
+            A boolean indicating whether the node should be filtered.
+        """
+        pass
+
+    def generate_execution_plan(self, kg: KnowledgeGraph) -> t.List[t.Coroutine]:
+        """
+        Generates a list of coroutines to be executed
+        """
+
+        async def apply_filter(node: Node):
+            if await self.custom_filter(node, kg):
+                kg.remove_node(node)
+
+        filtered = self.filter(kg)
+        return [apply_filter(node) for node in filtered.nodes]
+
+
+@dataclass
+class LLMBasedNodeFilter(NodeFilter, PromptMixin):
+    llm: BaseRagasLLM = field(default_factory=llm_factory)

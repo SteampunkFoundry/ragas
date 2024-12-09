@@ -1,38 +1,41 @@
 import typing as t
 
 from ragas.llms import BaseRagasLLM
-
-from .abstract_query import (
-    AbstractQuerySynthesizer,
-    ComparativeAbstractQuerySynthesizer,
+from ragas.testset.graph import KnowledgeGraph
+from ragas.testset.synthesizers.multi_hop import (
+    MultiHopAbstractQuerySynthesizer,
+    MultiHopSpecificQuerySynthesizer,
 )
+from ragas.testset.synthesizers.single_hop.specific import (
+    SingleHopSpecificQuerySynthesizer,
+)
+
 from .base import BaseSynthesizer
-from .base_query import QuerySynthesizer
-from .specific_query import SpecificQuerySynthesizer
 
 QueryDistribution = t.List[t.Tuple[BaseSynthesizer, float]]
 
 
-def default_query_distribution(llm: BaseRagasLLM) -> QueryDistribution:
-    """
-    Default query distribution for the test set.
-
-    By default, 25% of the queries are generated using `AbstractQuerySynthesizer`,
-    25% are generated using `ComparativeAbstractQuerySynthesizer`, and 50% are
-    generated using `SpecificQuerySynthesizer`.
-    """
-    return [
-        (AbstractQuerySynthesizer(llm=llm), 0.25),
-        (ComparativeAbstractQuerySynthesizer(llm=llm), 0.25),
-        (SpecificQuerySynthesizer(llm=llm), 0.5),
+def default_query_distribution(
+    llm: BaseRagasLLM, kg: t.Optional[KnowledgeGraph] = None
+) -> QueryDistribution:
+    """ """
+    default_queries = [
+        SingleHopSpecificQuerySynthesizer(llm=llm),
+        MultiHopAbstractQuerySynthesizer(llm=llm),
+        MultiHopSpecificQuerySynthesizer(llm=llm),
     ]
+    if kg is not None:
+        available_queries = []
+        for query in default_queries:
+            if query.get_node_clusters(kg):
+                available_queries.append(query)
+    else:
+        available_queries = default_queries
+
+    return [(query, 1 / len(available_queries)) for query in available_queries]
 
 
 __all__ = [
     "BaseSynthesizer",
-    "QuerySynthesizer",
-    "AbstractQuerySynthesizer",
-    "ComparativeAbstractQuerySynthesizer",
-    "SpecificQuerySynthesizer",
     "default_query_distribution",
 ]

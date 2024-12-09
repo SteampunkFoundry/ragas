@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 
 from ragas.dataset_schema import SingleTurnSample
 from ragas.metrics.base import (
+    MetricOutputType,
     MetricType,
     MetricWithLLM,
     SingleTurnMetric,
@@ -162,7 +163,7 @@ class NLIStatementPrompt(PydanticPrompt[NLIStatementInput, NLIStatementOutput]):
 
 @dataclass
 class Faithfulness(MetricWithLLM, SingleTurnMetric):
-    name: str = "faithfulness"  # type: ignore
+    name: str = "faithfulness"
     _required_columns: t.Dict[MetricType, t.Set[str]] = field(
         default_factory=lambda: {
             MetricType.SINGLE_TURN: {
@@ -172,6 +173,7 @@ class Faithfulness(MetricWithLLM, SingleTurnMetric):
             }
         }
     )
+    output_type: t.Optional[MetricOutputType] = MetricOutputType.CONTINUOUS
     nli_statements_message: PydanticPrompt = field(default_factory=NLIStatementPrompt)
     statement_prompt: PydanticPrompt = field(default_factory=LongFormAnswerPrompt)
     sentence_segmenter: t.Optional[HasSegmentMethod] = None
@@ -277,7 +279,7 @@ class Faithfulness(MetricWithLLM, SingleTurnMetric):
 
 @dataclass
 class FaithfulnesswithHHEM(Faithfulness):
-    name: str = "faithfulness_with_hhem"  # type: ignore
+    name: str = "faithfulness_with_hhem"
     device: str = "cpu"
     batch_size: int = 10
 

@@ -2,19 +2,22 @@ from __future__ import annotations
 
 import typing as t
 
-from .engine import Parallel
-from .extractors import (
+from ragas.testset.graph import NodeType
+from ragas.testset.transforms.extractors import (
     EmbeddingExtractor,
     HeadlinesExtractor,
-    KeyphrasesExtractor,
     SummaryExtractor,
-    TitleExtractor,
 )
-from .relationship_builders.cosine import (
+from ragas.testset.transforms.extractors.llm_based import NERExtractor, ThemesExtractor
+from ragas.testset.transforms.filters import CustomNodeFilter
+from ragas.testset.transforms.relationship_builders import (
     CosineSimilarityBuilder,
-    SummaryCosineSimilarityBuilder,
+    OverlapScoreBuilder,
 )
-from .splitters import HeadlineSplitter
+from ragas.testset.transforms.splitters import HeadlineSplitter
+from ragas.utils import num_tokens_from_string
+
+from .engine import Parallel
 
 if t.TYPE_CHECKING:
     from ragas.embeddings.base import BaseRagasEmbeddings
@@ -22,8 +25,11 @@ if t.TYPE_CHECKING:
 
     from .engine import Transforms
 
+from langchain_core.documents import Document as LCDocument
+
 
 def default_transforms(
+    documents: t.List[LCDocument],
     llm: BaseRagasLLM,
     embedding_model: BaseRagasEmbeddings,
 ) -> Transforms:
@@ -35,13 +41,7 @@ def default_transforms(
     headlines, and embeddings, as well as building similarity relationships
     between nodes.
 
-    The transforms are applied in the following order:
-    1. Parallel extraction of summaries and headlines
-    2. Embedding of summaries for document nodes
-    3. Splitting of headlines
-    4. Parallel extraction of embeddings, keyphrases, and titles
-    5. Building cosine similarity relationships between nodes
-    6. Building cosine similarity relationships between summaries
+
 
     Returns
     -------
@@ -49,32 +49,116 @@ def default_transforms(
         A list of transformation steps to be applied to the knowledge graph.
 
     """
-    from ragas.testset.graph import NodeType
 
-    # define the transforms
-    summary_extractor = SummaryExtractor(llm=llm)
-    keyphrase_extractor = KeyphrasesExtractor(llm=llm)
-    title_extractor = TitleExtractor(llm=llm)
-    headline_extractor = HeadlinesExtractor(llm=llm)
-    embedding_extractor = EmbeddingExtractor(embedding_model=embedding_model)
-    headline_splitter = HeadlineSplitter()
-    cosine_sim_builder = CosineSimilarityBuilder(threshold=0.8)
-    summary_embedder = EmbeddingExtractor(
-        name="summary_embedder",
-        property_name="summary_embedding",
-        embed_property_name="summary",
-        filter_nodes=lambda node: True if node.type == NodeType.DOCUMENT else False,
-        embedding_model=embedding_model,
-    )
-    summary_cosine_sim_builder = SummaryCosineSimilarityBuilder(threshold=0.6)
+    def count_doc_length_bins(documents, bin_ranges):
+        data = [num_tokens_from_string(doc.page_content) for doc in documents]
+        bins = {f"{start}-{end}": 0 for start, end in bin_ranges}
 
-    # specify the transforms and their order to be applied
-    transforms = [
-        Parallel(summary_extractor, headline_extractor),
-        summary_embedder,
-        headline_splitter,
-        Parallel(embedding_extractor, keyphrase_extractor, title_extractor),
-        cosine_sim_builder,
-        summary_cosine_sim_builder,
-    ]
+        for num in data:
+            for start, end in bin_ranges:
+                if start <= num <= end:
+                    bins[f"{start}-{end}"] += 1
+                    break  # Move to the next number once it’s placed in a bin
+
+        return bins
+
+    def filter_doc_with_num_tokens(node, min_num_tokens=500):
+        return (
+            node.type == NodeType.DOCUMENT
+            and num_tokens_from_string(node.properties["page_content"]) > min_num_tokens
+        )
+
+    def filter_docs(node):
+        return node.type == NodeType.DOCUMENT
+
+    def filter_chunks(node):
+        return node.type == NodeType.CHUNK
+
+    bin_ranges = [(0, 100), (101, 500), (501, 100000)]
+    result = count_doc_length_bins(documents, bin_ranges)
+    result = {k: v / len(documents) for k, v in result.items()}
+
+    transforms = []
+
+    if result["501-100000"] >= 0.25:
+        headline_extractor = HeadlinesExtractor(
+            llm=llm, filter_nodes=lambda node: filter_doc_with_num_tokens(node)
+        )
+        splitter = HeadlineSplitter(min_tokens=500)
+        summary_extractor = SummaryExtractor(
+            llm=llm, filter_nodes=lambda node: filter_doc_with_num_tokens(node)
+        )
+
+        theme_extractor = ThemesExtractor(
+            llm=llm, filter_nodes=lambda node: filter_chunks(node)
+        )
+        ner_extractor = NERExtractor(
+            llm=llm, filter_nodes=lambda node: filter_chunks(node)
+        )
+
+        summary_emb_extractor = EmbeddingExtractor(
+            embedding_model=embedding_model,
+            property_name="summary_embedding",
+            embed_property_name="summary",
+            filter_nodes=lambda node: filter_doc_with_num_tokens(node),
+        )
+
+        cosine_sim_builder = CosineSimilarityBuilder(
+            property_name="summary_embedding",
+            new_property_name="summary_similarity",
+            threshold=0.7,
+            filter_nodes=lambda node: filter_doc_with_num_tokens(node),
+        )
+
+        ner_overlap_sim = OverlapScoreBuilder(
+            threshold=0.01, filter_nodes=lambda node: filter_chunks(node)
+        )
+
+        node_filter = CustomNodeFilter(
+            llm=llm, filter_nodes=lambda node: filter_chunks(node)
+        )
+        transforms = [
+            headline_extractor,
+            splitter,
+            summary_extractor,
+            node_filter,
+            Parallel(summary_emb_extractor, theme_extractor, ner_extractor),
+            Parallel(cosine_sim_builder, ner_overlap_sim),
+        ]
+    elif result["101-500"] >= 0.25:
+        summary_extractor = SummaryExtractor(
+            llm=llm, filter_nodes=lambda node: filter_doc_with_num_tokens(node, 100)
+        )
+        summary_emb_extractor = EmbeddingExtractor(
+            embedding_model=embedding_model,
+            property_name="summary_embedding",
+            embed_property_name="summary",
+            filter_nodes=lambda node: filter_doc_with_num_tokens(node, 100),
+        )
+
+        cosine_sim_builder = CosineSimilarityBuilder(
+            property_name="summary_embedding",
+            new_property_name="summary_similarity",
+            threshold=0.5,
+            filter_nodes=lambda node: filter_doc_with_num_tokens(node, 100),
+        )
+
+        ner_extractor = NERExtractor(llm=llm)
+        ner_overlap_sim = OverlapScoreBuilder(threshold=0.01)
+        theme_extractor = ThemesExtractor(
+            llm=llm, filter_nodes=lambda node: filter_docs(node)
+        )
+        node_filter = CustomNodeFilter(llm=llm)
+
+        transforms = [
+            summary_extractor,
+            node_filter,
+            Parallel(summary_emb_extractor, theme_extractor, ner_extractor),
+            ner_overlap_sim,
+        ]
+    else:
+        raise ValueError(
+            "Documents appears to be too short (ie 100 tokens or less). Please provide longer documents."
+        )
+
     return transforms

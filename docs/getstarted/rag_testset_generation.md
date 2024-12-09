@@ -39,7 +39,7 @@ Now we will run the test generation using the loaded documents and the LLM setup
 ```python
 from ragas.testset import TestsetGenerator
 
-generator = TestsetGenerator(llm=generator_llm)
+generator = TestsetGenerator(llm=generator_llm, embedding_model=generator_embeddings)
 dataset = generator.generate_with_langchain_docs(docs, testset_size=10)
 ```
 
@@ -107,7 +107,7 @@ from ragas.testset.transforms import default_transforms, apply_transforms
 transformer_llm = generator_llm
 embedding_model = generator_embeddings
 
-trans = default_transforms(llm=transformer_llm, embedding_model=embedding_model)
+trans = default_transforms(documents=docs, llm=transformer_llm, embedding_model=embedding_model)
 apply_transforms(kg, trans)
 ```
 
@@ -129,7 +129,7 @@ Now we will use the `loaded_kg` to create the [TestsetGenerator][ragas.testset.s
 ```python
 from ragas.testset import TestsetGenerator
 
-generator = TestsetGenerator(llm=generator_llm, knowledge_graph=loaded_kg)
+generator = TestsetGenerator(llm=generator_llm, embedding_model=embedding_model, knowledge_graph=loaded_kg)
 ```
 
 We can also define the distribution of queries we would like to generate. Here lets use the default distribution.
@@ -141,9 +141,9 @@ query_distribution = default_query_distribution(generator_llm)
 ```
 ```
 [
-    (AbstractQuerySynthesizer(llm=generator_llm), 0.25),
-    (ComparativeAbstractQuerySynthesizer(llm=generator_llm), 0.25),
-    (SpecificQuerySynthesizer(llm=generator_llm), 0.5),
+        (SingleHopSpecificQuerySynthesizer(llm=llm), 0.5),
+        (MultiHopAbstractQuerySynthesizer(llm=llm), 0.25),
+        (MultiHopSpecificQuerySynthesizer(llm=llm), 0.25),
 ]
 ```
 

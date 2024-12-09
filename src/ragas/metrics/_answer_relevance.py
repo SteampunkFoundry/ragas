@@ -9,6 +9,7 @@ from pydantic import BaseModel
 
 from ragas.dataset_schema import SingleTurnSample
 from ragas.metrics.base import (
+    MetricOutputType,
     MetricType,
     MetricWithEmbeddings,
     MetricWithLLM,
@@ -78,7 +79,7 @@ class ResponseRelevancy(MetricWithLLM, MetricWithEmbeddings, SingleTurnMetric):
         E.g. HuggingFaceEmbeddings('BAAI/bge-base-en')
     """
 
-    name: str = "answer_relevancy"  # type: ignore
+    name: str = "answer_relevancy"
     _required_columns: t.Dict[MetricType, t.Set[str]] = field(
         default_factory=lambda: {
             MetricType.SINGLE_TURN: {
@@ -87,6 +88,8 @@ class ResponseRelevancy(MetricWithLLM, MetricWithEmbeddings, SingleTurnMetric):
             }
         }
     )
+    output_type = MetricOutputType.CONTINUOUS
+
     question_generation: PydanticPrompt = ResponseRelevancePrompt()
     strictness: int = 3
 

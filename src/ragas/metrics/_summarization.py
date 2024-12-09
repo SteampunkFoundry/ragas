@@ -8,7 +8,12 @@ from typing import Dict
 from pydantic import BaseModel
 
 from ragas.dataset_schema import SingleTurnSample
-from ragas.metrics.base import MetricType, MetricWithLLM, SingleTurnMetric
+from ragas.metrics.base import (
+    MetricOutputType,
+    MetricType,
+    MetricWithLLM,
+    SingleTurnMetric,
+)
 from ragas.prompt import PydanticPrompt, StringIO
 
 if t.TYPE_CHECKING:
@@ -143,7 +148,7 @@ class GenerateAnswersPrompt(PydanticPrompt[SummaryAndQuestions, AnswersGenerated
 
 @dataclass
 class SummarizationScore(MetricWithLLM, SingleTurnMetric):
-    name: str = "summary_score"  # type: ignore
+    name: str = "summary_score"
     max_retries: int = 1
     length_penalty: bool = True
     _required_columns: t.Dict[MetricType, t.Set[str]] = field(
@@ -154,6 +159,7 @@ class SummarizationScore(MetricWithLLM, SingleTurnMetric):
             }
         }
     )
+    output_type: t.Optional[MetricOutputType] = MetricOutputType.CONTINUOUS
     coeff: float = 0.5
     question_generation_prompt: PydanticPrompt = field(
         default_factory=GenerateQuestionsPrompt

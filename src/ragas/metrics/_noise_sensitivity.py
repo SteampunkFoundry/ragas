@@ -15,6 +15,7 @@ from ragas.metrics._faithfulness import (
     NLIStatementPrompt,
 )
 from ragas.metrics.base import (
+    MetricOutputType,
     MetricType,
     MetricWithLLM,
     SingleTurnMetric,
@@ -31,7 +32,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class NoiseSensitivity(MetricWithLLM, SingleTurnMetric):
-    name: str = "noise_sensitivity"  # type: ignore
+    name: str = "noise_sensitivity"
     focus: t.Literal["relevant", "irrelevant"] = "relevant"
     _required_columns: t.Dict[MetricType, t.Set[str]] = field(
         default_factory=lambda: {
@@ -43,6 +44,7 @@ class NoiseSensitivity(MetricWithLLM, SingleTurnMetric):
             }
         }
     )
+    output_type: t.Optional[MetricOutputType] = MetricOutputType.CONTINUOUS
     nli_statements_message: PydanticPrompt = field(default_factory=NLIStatementPrompt)
     statement_prompt: PydanticPrompt = field(default_factory=LongFormAnswerPrompt)
     sentence_segmenter: t.Optional[HasSegmentMethod] = None
@@ -73,7 +75,7 @@ class NoiseSensitivity(MetricWithLLM, SingleTurnMetric):
             raise ValueError(
                 f"Invalid argument passed for 'focus': {self.focus}. Must be 'relevant' or 'irrelevant'."
             )
-        self.name = f"{self.name}_{self.focus}"  # type: ignore
+        self.name = f"{self.name}_{self.focus}"
 
     async def _evaluate_statement_faithfulness(
         self, statements: t.List[str], context: str, callbacks: Callbacks
@@ -98,11 +100,7 @@ class NoiseSensitivity(MetricWithLLM, SingleTurnMetric):
         assert self.sentence_segmenter is not None, "sentence_segmenter is not set"
 
         sentences = self.sentence_segmenter.segment(text)
-        sentences_with_index = {
-            i: sentence
-            for i, sentence in enumerate(sentences)
-            if sentence.strip().endswith(".")
-        }
+        sentences_with_index = {i: sentence for i, sentence in enumerate(sentences)}
 
         statements_simplified = await self.statement_prompt.generate(
             llm=self.llm,
@@ -154,7 +152,7 @@ class NoiseSensitivity(MetricWithLLM, SingleTurnMetric):
         row = sample.to_dict()
         return await self._ascore(row, callbacks)
 
-    async def _ascore(self: t.Self, row: t.Dict, callbacks: Callbacks) -> float:
+    async def _ascore(self, row: t.Dict, callbacks: Callbacks) -> float:
         """
         returns the NLI score for each (q, c, a) pair
         """

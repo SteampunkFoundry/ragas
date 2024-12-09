@@ -1,6 +1,3 @@
-import inspect
-import sys
-
 from ragas.metrics._answer_correctness import AnswerCorrectness, answer_correctness
 from ragas.metrics._answer_relevance import (
     AnswerRelevancy,
@@ -21,8 +18,8 @@ from ragas.metrics._context_entities_recall import (
 from ragas.metrics._context_precision import (
     ContextPrecision,
     ContextUtilization,
-    LLMContextPrecisionWithReference,
     LLMContextPrecisionWithoutReference,
+    LLMContextPrecisionWithReference,
     NonLLMContextPrecisionWithReference,
     context_precision,
 )
@@ -33,22 +30,25 @@ from ragas.metrics._context_recall import (
     context_recall,
 )
 from ragas.metrics._datacompy_score import DataCompyScore
-from ragas.metrics._domain_specific_rubrics import (
-    RubricsScoreWithoutReference,
-    RubricsScoreWithReference,
-)
+from ragas.metrics._domain_specific_rubrics import RubricsScore
 from ragas.metrics._factual_correctness import FactualCorrectness
 from ragas.metrics._faithfulness import Faithfulness, FaithfulnesswithHHEM, faithfulness
 from ragas.metrics._goal_accuracy import (
     AgentGoalAccuracyWithoutReference,
     AgentGoalAccuracyWithReference,
 )
-from ragas.metrics._instance_specific_rubrics import (
-    InstanceRubricsScoreWithoutReference,
-    InstanceRubricsWithReference,
+from ragas.metrics._instance_specific_rubrics import InstanceRubrics
+from ragas.metrics._multi_modal_faithfulness import (
+    MultiModalFaithfulness,
+    multimodal_faithness,
+)
+from ragas.metrics._multi_modal_relevance import (
+    MultiModalRelevance,
+    multimodal_relevance,
 )
 from ragas.metrics._noise_sensitivity import NoiseSensitivity
-from ragas.metrics._rogue_score import RougeScore
+from ragas.metrics._rouge_score import RougeScore
+from ragas.metrics._simple_criteria import SimpleCriteriaScore
 from ragas.metrics._sql_semantic_equivalence import LLMSQLEquivalence
 from ragas.metrics._string import (
     DistanceMeasure,
@@ -59,8 +59,26 @@ from ragas.metrics._string import (
 from ragas.metrics._summarization import SummarizationScore, summarization_score
 from ragas.metrics._tool_call_accuracy import ToolCallAccuracy
 from ragas.metrics._topic_adherence import TopicAdherenceScore
+from ragas.metrics.base import (
+    Metric,
+    MetricOutputType,
+    MetricType,
+    MetricWithEmbeddings,
+    MetricWithLLM,
+    MultiTurnMetric,
+    SingleTurnMetric,
+)
 
 __all__ = [
+    # basic metrics primitives
+    "Metric",
+    "MetricType",
+    "MetricWithEmbeddings",
+    "MetricWithLLM",
+    "SingleTurnMetric",
+    "MultiTurnMetric",
+    "MetricOutputType",
+    # specific metrics
     "AnswerCorrectness",
     "answer_correctness",
     "Faithfulness",
@@ -71,6 +89,7 @@ __all__ = [
     "ContextPrecision",
     "context_precision",
     "ContextUtilization",
+    "SimpleCriteriaScore",
     "ContextRecall",
     "context_recall",
     "AspectCritic",
@@ -81,8 +100,7 @@ __all__ = [
     "SummarizationScore",
     "summarization_score",
     "NoiseSensitivity",
-    "RubricsScoreWithoutReference",
-    "RubricsScoreWithReference",
+    "RubricsScore",
     "LLMContextPrecisionWithReference",
     "LLMContextPrecisionWithoutReference",
     "NonLLMContextPrecisionWithReference",
@@ -90,8 +108,7 @@ __all__ = [
     "LLMContextRecall",
     "NonLLMContextRecall",
     "FactualCorrectness",
-    "InstanceRubricsScoreWithoutReference",
-    "InstanceRubricsWithReference",
+    "InstanceRubrics",
     "NonLLMStringSimilarity",
     "ExactMatch",
     "StringPresence",
@@ -107,11 +124,8 @@ __all__ = [
     "DistanceMeasure",
     "TopicAdherenceScore",
     "LLMSQLEquivalence",
-]
-
-current_module = sys.modules[__name__]
-ALL_METRICS = [
-    obj
-    for name, obj in inspect.getmembers(current_module)
-    if name in __all__ and not inspect.isclass(obj) and not inspect.isbuiltin(obj)
+    "MultiModalFaithfulness",
+    "multimodal_faithness",
+    "MultiModalRelevance",
+    "multimodal_relevance",
 ]
